@@ -1,0 +1,272 @@
+using System.Collections.Generic;
+using UnityEngine;
+
+// Penalised pawn stacking & improves search by checking captures, promotions, and castling first
+// Further penalises repeating moves
+
+public class NoPawnStacking : ChessAgent
+{
+    [SerializeField, Range(1,15)] private int searchDepth = 5;
+    public override int? SearchDepth => searchDepth;
+
+    private const float PAWN_SCORE = 1f;
+    private const float KNIGHT_SCORE = 3f;
+    private const float BISHOP_SCORE = 3.5f;
+    private const float ROOK_SCORE = 5f;
+    private const float QUEEN_SCORE = 9f;
+
+    private const ulong AFile = 0x0101010101010101UL;
+    private const float STACKED_PAWN_PENALTY = 0.2f;
+
+    private const float REPETITION_PENALTY = 0.35f;
+
+    private readonly Dictionary<ulong, int> positionHistory = new Dictionary<ulong, int>();
+    private Dictionary<ulong, TTEntry> transpositionTable = new Dictionary<ulong, TTEntry>();
+
+    private void RecordPosition(ulong zobristKey)
+    {
+        int count;
+
+        if (!positionHistory.TryGetValue(zobristKey, out count))
+            count = 0;
+
+        positionHistory[zobristKey] = ++count;
+    }
+
+    private int GetPositionCount(ulong zobristKey)
+    {
+        int count;
+
+        if (!positionHistory.TryGetValue(zobristKey, out count))
+            return 0;
+
+        return count;
+    }
+
+    protected override SearchResult ChooseMove(BoardState state)
+    {
+        positionHistory.Clear();
+        foreach (ulong key in PositionHistory)
+            RecordPosition(key);
+
+        Move? bestMove = null;
+        float bestScore = IsWhite ? float.NegativeInfinity : float.PositiveInfinity;
+
+        if (transpositionTable.Count > 500000) transpositionTable.Clear(); 
+
+        List<Move> moves = MoveGenerator.GenerateMoves(ref state);
+        OrderMoves(moves);
+
+        foreach (Move move in moves)
+        {
+            UndoInfo undoInfo = state.MakeMove(move);
+
+            RecordPosition(state.ZobristKey);
+            float score = Minimax(state, searchDepth - 1, float.MinValue, float.MaxValue);
+            positionHistory[state.ZobristKey]--;
+
+            state.UnmakeMove(move, undoInfo);
+
+            if ((IsWhite && score > bestScore) || (!IsWhite &&  score < bestScore))
+            {
+                bestScore = score;
+                bestMove = move;
+            }
+        }
+
+        if (bestMove == null) throw new System.InvalidOperationException("No move was found!");
+        return new SearchResult(
+            bestMove.Value,
+            (int)bestScore,
+            evaluatedStates);
+    }
+
+    private float Minimax(BoardState state, int depth, float alpha, float beta)
+    {
+        if (GetPositionCount(state.ZobristKey) == 0)
+            if (transpositionTable.TryGetValue(state.ZobristKey, out TTEntry entry) && entry.Depth >= depth)
+                return entry.Score;
+
+        if (state.IsFifty() || state.IsInsufficientMaterial())
+        {
+            return 0f;
+        }
+
+        List<Move> moves = MoveGenerator.GenerateMoves(ref state);
+        OrderMoves(moves);
+
+        if (moves.Count == 0)
+        {
+            return state.IsCheck()
+                ? state.IsWhiteTurn ? float.MinValue : float.MaxValue
+                : 0f;
+        }
+
+        if (depth == 0)
+        {
+            return EvaluateState(in state);
+        }
+
+        bool whiteToMove = state.IsWhiteTurn;
+        float best = whiteToMove ? float.NegativeInfinity : float.PositiveInfinity;
+
+        foreach (Move move in moves)
+        {
+            UndoInfo undo = state.MakeMove(move);
+
+            RecordPosition(state.ZobristKey);
+            float score = Minimax(state, depth - 1, alpha, beta);
+            positionHistory[state.ZobristKey]--;
+
+            state.UnmakeMove(move, undo);
+
+            if (whiteToMove)
+            {
+                best = Mathf.Max(best, score);
+                alpha = Mathf.Max(alpha, best);
+            }
+            else
+            {
+                best = Mathf.Min(best, score);
+                beta = Mathf.Min(beta, best);
+            }
+
+            if (beta <= alpha)
+            {
+                break;
+            }
+        }
+
+        if (GetPositionCount(state.ZobristKey) == 0)
+            transpositionTable[state.ZobristKey] = new TTEntry { Score = best, Depth = depth };
+
+        return best;
+    }
+
+    private float EvaluateState(in BoardState state)
+    {
+        evaluatedStates++;
+
+        if (state.IsTerminalState())
+        {
+            if (state.IsMate())
+            {
+                // The side to move is checkmated
+                return state.IsWhiteTurn ? float.MinValue : float.MaxValue;
+            }
+            else
+            {
+                // Draw
+                return 0f;
+            }
+        }
+
+        float whiteMaterialScore =
+            (PAWN_SCORE * BitUtils.PopCount(state.WhitePawns)) +
+            (KNIGHT_SCORE * BitUtils.PopCount(state.WhiteKnights)) +
+            (BISHOP_SCORE * BitUtils.PopCount(state.WhiteBishops)) +
+            (ROOK_SCORE * BitUtils.PopCount(state.WhiteRooks)) +
+            (QUEEN_SCORE * BitUtils.PopCount(state.WhiteQueens));
+        float blackMaterialScore = 
+            (PAWN_SCORE * BitUtils.PopCount(state.BlackPawns)) +
+            (KNIGHT_SCORE * BitUtils.PopCount(state.BlackKnights)) +
+            (BISHOP_SCORE * BitUtils.PopCount(state.BlackBishops)) +
+            (ROOK_SCORE * BitUtils.PopCount(state.BlackRooks)) +
+            (QUEEN_SCORE * BitUtils.PopCount(state.BlackQueens));
+
+        // Calculate pawn stack penalty
+
+        int CountStackedPawns(ulong pawns)
+        {
+            int stackedPawns = 0;
+
+            for (int file = 0; file < 8; file++)
+            {
+                ulong fileMask = AFile << file;
+                ulong pawnsOnFile = pawns & fileMask;
+
+                int count = BitUtils.PopCount(pawnsOnFile);
+
+                if (count > 1)
+                {
+                    // Penalize every extra pawn beyond the first.
+                    stackedPawns += count - 1;
+                }
+            }
+
+            return stackedPawns;
+        }
+
+        float whiteStackedPawnPenalty = STACKED_PAWN_PENALTY * CountStackedPawns(state.WhitePawns);
+        float blackStackedPawnPenalty = STACKED_PAWN_PENALTY * CountStackedPawns(state.BlackPawns);
+
+        // Repetition penalty
+        int whiteRepPenalty = 0;
+        int blackRepPenalty = 0;
+
+        if (state.IsWhiteTurn)
+            whiteRepPenalty = Mathf.Max(0, GetPositionCount(state.ZobristKey) - 1);
+        else
+            blackRepPenalty = Mathf.Max(0, GetPositionCount(state.ZobristKey) - 1);
+
+        return
+            whiteMaterialScore
+            - blackMaterialScore
+            - whiteStackedPawnPenalty
+            + blackStackedPawnPenalty
+            - (REPETITION_PENALTY * whiteRepPenalty)
+            + (REPETITION_PENALTY * blackRepPenalty);
+    }
+
+    private static void OrderMoves(List<Move> moves)
+    {
+        moves.Sort((a, b) => GetMoveOrderScore(b).CompareTo(GetMoveOrderScore(a)));
+    }
+
+    private static float GetMoveOrderScore(Move move)
+    {
+        float score = 0f;
+
+        // Captures first: Most Val Victim - Least Val Attacker
+        if (move.CapturePiece.HasValue)
+        {
+            score += 10_000f;
+            score += GetPieceValue(move.CapturePiece.Value) * 10f;
+            score -= GetPieceValue(move.Piece);
+        }
+
+        // Promotions
+        if (move.IsPromotion())
+        {
+            score += 9_000f;
+        }
+
+        // Castling
+        if (move.IsCastle())
+        {
+            score += 50f;
+        }
+
+        return score;
+    }
+
+    private static float GetPieceValue(PieceType type)
+    {
+        return type switch
+        {
+            PieceType.Pawn => PAWN_SCORE,
+            PieceType.Knight => KNIGHT_SCORE,
+            PieceType.Bishop => BISHOP_SCORE,
+            PieceType.Rook => ROOK_SCORE,
+            PieceType.Queen => QUEEN_SCORE,
+            PieceType.King => 1000f,
+            _ => 0f
+        };
+    }
+
+    private struct TTEntry
+    {
+        public float Score;
+        public int Depth;
+    }
+}

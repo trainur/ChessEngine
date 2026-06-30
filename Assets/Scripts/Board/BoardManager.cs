@@ -1,0 +1,265 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class BoardManager : MonoBehaviour
+{
+    [SerializeField] private string OverrideFen;
+    [SerializeField] private GameObject[] PiecePrefabs;
+
+    [Header("Game Agents")]
+    [SerializeField] private ChessAgent WhiteAgent;
+    [SerializeField] private ChessAgent BlackAgent;
+
+    [Header("Sounds")]
+    [SerializeField] private AudioClip MoveClip;
+    [SerializeField] private AudioClip CheckClip;
+    [SerializeField] private AudioClip EndClip;
+
+    [Header("Highlights")]
+    [SerializeField] private GameObject HighlightFromPrefab;
+    [SerializeField] private GameObject HighlightToPrefab;
+
+    public List<ulong> PositionHistory { get; private set; } = new List<ulong>();
+
+    private GameObject fromHighlight = null;
+    private GameObject toHighlight = null;
+
+    private GameObject[,] pieceObjects = new GameObject[8, 8];
+
+    private AudioSource AudioS;
+
+    private ChessboardImageCreator BoardHandler;
+
+    private BoardState State;
+
+    private UndoInfo undoInfo;
+
+    private StatsHandler Stats;
+
+    void Awake()
+    {
+        BoardHandler = GetComponent<ChessboardImageCreator>();
+        AudioS = GetComponent<AudioSource>();
+        Stats = GetComponent<StatsHandler>();
+    }
+
+    void Start()
+    {
+        InitialiseAgents();
+        StartGame();
+    }
+
+    private void InitialiseAgents()
+    {
+        if (WhiteAgent == null) WhiteAgent = gameObject.AddComponent<HumanAgent>();
+        if (BlackAgent == null) BlackAgent = gameObject.AddComponent<HumanAgent>();
+
+        WhiteAgent.IsWhite = true;
+        BlackAgent.IsWhite = false;
+
+        Stats.InitialiseAgents(WhiteAgent, BlackAgent);
+    }
+
+    private void StartGame()
+    {
+        Debug.Log("Starting game");
+
+        State = FenParser.Parse(OverrideFen) ?? throw new ArgumentNullException(nameof(OverrideFen));
+
+        Stats.ResetStats();
+        SyncVisuals();
+
+        ChessAgent startingAgent = State.IsWhiteTurn ? WhiteAgent : BlackAgent;
+        startingAgent.StartTurn(State);
+    }
+
+    public void MakeMove(Move move, ThinkStats? thinkStats = null)
+    {
+        undoInfo = State.MakeMove(move);
+
+        SyncVisuals((move.From, move.To));
+        Stats.UpdateAgentStats(State.IsWhiteTurn, thinkStats);
+
+        GameResult? result = DetermineStatus();
+
+        if (result.HasValue)
+        {
+            OnGameEnd(result.Value);
+            return;
+        }
+
+        ChessAgent nextAgent = State.IsWhiteTurn ? WhiteAgent : BlackAgent;
+        nextAgent.StartTurn(State);
+
+        PositionHistory.Add(State.ZobristKey);
+    }
+
+    private GameResult? DetermineStatus()
+    {
+        // Game end
+        // MoveCount is decremented one if white plays to keep move count accurate
+        if (State.IsMate())
+        {
+            if (State.IsWhiteTurn) Stats.blackWins += 1; else Stats.whiteWins += 1;
+            AudioS.PlayOneShot(EndClip);
+            return new GameResult(State.IsWhiteTurn ? "Black" : "White", "Checkmate", State.IsWhiteTurn ? State.FullMoveNumber - 1 : State.FullMoveNumber);
+        }
+        if (State.IsStalemate())
+        {
+            Stats.draws += 1;
+            AudioS.PlayOneShot(EndClip);
+            return new GameResult("Draw", "Stalemate", State.IsWhiteTurn ? State.FullMoveNumber - 1 : State.FullMoveNumber);
+        }
+        if (State.IsInsufficientMaterial())
+        {
+            Stats.draws += 1;
+            AudioS.PlayOneShot(EndClip);
+            return new GameResult("Draw", "Insufficient Material", State.IsWhiteTurn ? State.FullMoveNumber - 1 : State.FullMoveNumber);
+        }
+        if (State.IsFifty())
+        {
+            Stats.draws += 1;
+            AudioS.PlayOneShot(EndClip);
+            return new GameResult("Draw", "Fifty Move Rule", State.IsWhiteTurn ? State.FullMoveNumber - 1 : State.FullMoveNumber);
+        }
+
+        // Game continues
+        if (State.IsCheck()) AudioS.PlayOneShot(CheckClip);
+        else AudioS.PlayOneShot(MoveClip);
+
+        return null;
+    }
+
+    private void OnGameEnd(GameResult result)
+    {
+        // Later add reasons to csv or something
+        Debug.Log($"Game over — Winner: {result.Winner}, Reason: {result.Reason}, Moves: {result.MoveCount}");
+
+        Stats.UpdateGameStats(result);
+
+        // Wait a couple of secs before starting new game
+        StartCoroutine(RestartAfterDelay());
+    }
+
+    private IEnumerator RestartAfterDelay()
+    {
+        yield return new WaitForSeconds(2f);
+
+        StartGame();
+    }
+
+    private void SpawnAllPieces()
+    {
+        for (int rank = 0; rank < 8; rank++)
+        { 
+            for (int file = 0; file < 8; file++)
+            {
+                int square = rank * 8 + file;
+
+                ulong bit = 1UL << square;
+
+                int prefabIndex = -1;
+
+                if ((State.WhitePawns & bit) != 0) prefabIndex = (int)PiecePrefabIndex.WPawn;
+                else if ((State.WhiteKnights & bit) != 0) prefabIndex = (int)PiecePrefabIndex.WKnight;
+                else if ((State.WhiteBishops & bit) != 0) prefabIndex = (int)PiecePrefabIndex.WBishop;
+                else if ((State.WhiteRooks & bit) != 0) prefabIndex = (int)PiecePrefabIndex.WRook;
+                else if ((State.WhiteQueens & bit) != 0) prefabIndex = (int)PiecePrefabIndex.WQueen;
+                else if ((State.WhiteKing & bit) != 0) prefabIndex = (int)PiecePrefabIndex.WKing;
+
+                else if ((State.BlackPawns & bit) != 0) prefabIndex = (int)PiecePrefabIndex.BPawn;
+                else if ((State.BlackKnights & bit) != 0) prefabIndex = (int)PiecePrefabIndex.BKnight;
+                else if ((State.BlackBishops & bit) != 0) prefabIndex = (int)PiecePrefabIndex.BBishop;
+                else if ((State.BlackRooks & bit) != 0) prefabIndex = (int)PiecePrefabIndex.BRook;
+                else if ((State.BlackQueens & bit) != 0) prefabIndex = (int)PiecePrefabIndex.BQueen;
+                else if ((State.BlackKing & bit) != 0) prefabIndex = (int)PiecePrefabIndex.BKing;
+
+                if (prefabIndex != -1) SpawnPiece(file, rank, prefabIndex);
+            }
+        }   
+    }
+
+    private void SpawnPiece(int file, int rank, int prefabIndex)
+    {
+        GameObject prefab = PiecePrefabs[prefabIndex];
+        if (prefab == null) throw new System.ArgumentException($"Invalid piece prefab index recieved: {prefabIndex}");
+
+        int childIndex = (7 - rank) * 8 + file;
+        Transform cell = BoardHandler.GetSquare(file, rank);
+
+        GameObject go = Instantiate(prefab, cell);
+
+        pieceObjects[file, rank] = go;
+    }
+
+    public void SyncVisuals((int fromSq, int toSq)? fromToSq = null)
+    {
+        // Clear board
+        foreach (var go in pieceObjects)
+            if (go != null) Destroy(go);
+        if (fromHighlight != null)
+        {
+            Destroy(fromHighlight);
+            fromHighlight = null;
+        }
+        if (toHighlight != null)
+        {
+            Destroy(toHighlight);
+            toHighlight = null;
+        }
+
+        // Add move highlights
+        if (fromToSq.HasValue)
+        {
+            int fromSq = fromToSq.Value.fromSq;
+            int toSq = fromToSq.Value.toSq;
+
+            int fromFile = fromSq % 8;
+            int fromRank = fromSq / 8;
+
+            int toFile = toSq % 8;
+            int toRank = toSq / 8;
+
+            Transform fromCell = BoardHandler.GetSquare(fromFile, fromRank);
+            Transform toCell = BoardHandler.GetSquare(toFile, toRank);
+
+            fromHighlight = Instantiate(HighlightFromPrefab, fromCell);
+            toHighlight = Instantiate(HighlightToPrefab, toCell);
+        }
+
+        pieceObjects = new GameObject[8, 8];
+        SpawnAllPieces();
+    }
+}
+
+public struct GameResult
+{
+    public readonly string Winner;
+    public readonly string Reason;
+    public readonly int MoveCount;
+
+    public GameResult(string winner, string reason, int moveCount)
+    {
+        Winner = winner;
+        Reason = reason;
+        MoveCount = moveCount;
+    }
+}
+
+public enum PiecePrefabIndex
+{
+    WPawn = 0,
+    WKnight = 1,
+    WBishop = 2,
+    WRook = 3,
+    WQueen = 4,
+    WKing = 5,
+    BPawn = 6,
+    BKnight = 7,
+    BBishop = 8,
+    BRook = 9,
+    BQueen = 10,
+    BKing = 11,
+}
