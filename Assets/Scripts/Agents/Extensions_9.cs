@@ -3,6 +3,7 @@ using UnityEngine;
 
 // https://www.chessprogramming.org/Extensions
 // Fix PST table logic bug
+// This bots fucking stupid, earlier bot version thinks longer but doesn't miss mates in 2.
 
 public class Extensions_9 : ChessAgent
 {
@@ -100,7 +101,10 @@ public class Extensions_9 : ChessAgent
         phase -= BitUtils.PopCount(state.WhiteQueens) * PHASE_QUEEN;
         phase -= BitUtils.PopCount(state.BlackQueens) * PHASE_QUEEN;
 
-        return phase; // 0 = opening, 24 = endgame
+        // phase is in [0, 24]. Blends opening and endgame evaluation
+        // 0 = opening, 24 = endgame
+
+        return Mathf.Clamp(phase, 0, TOTAL_PHASE);
     }
 
     private void RecordPosition(ulong zobristKey)
