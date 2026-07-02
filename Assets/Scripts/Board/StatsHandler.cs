@@ -43,14 +43,14 @@ public class StatsHandler : MonoBehaviour
         BlackStats.Init("Black", BlackAgent);
     }
 
-    public void UpdateAgentStats(bool isWhiteTurnAfterMove, ThinkStats? thinkStats = null)
+    public void UpdateAgentStats(bool moveWasWhite, ThinkStats? thinkStats = null)
     {
         if (thinkStats.HasValue)
         {
-            if (isWhiteTurnAfterMove)
-                BlackStats.SetStats(thinkStats.Value);
-            else
+            if (moveWasWhite)
                 WhiteStats.SetStats(thinkStats.Value);
+            else
+                BlackStats.SetStats(thinkStats.Value);
         }
     }
     public void UpdateGameStats(GameResult gameResult)
@@ -69,9 +69,11 @@ public class StatsHandler : MonoBehaviour
         [SerializeField] private TMP_Text PosEvalText;
         [SerializeField] private TMP_Text DepthText;
         [SerializeField] private TMP_Text EvalScoreText;
+        [SerializeField] private bool ReverseEval;
 
         private ChessAgent Agent;
         private string SideName;
+
 
         private int? lastDepth;
         private float totalThinkTime;
@@ -161,6 +163,8 @@ public class StatsHandler : MonoBehaviour
 
                 return score > 0 ? $"+M{mateInMoves}" : $"-M{mateInMoves}";
             }
+
+            if (ReverseEval) score *= -1;
 
             return score.ToString("+0;-0;0");
         }

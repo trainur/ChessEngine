@@ -53,7 +53,8 @@ public enum MoveFlag
     PromoteQueen,
     PromoteRook,
     PromoteBishop,
-    PromoteKnight
+    PromoteKnight,
+    Draw
 }
 
 public enum PieceType

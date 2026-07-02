@@ -35,7 +35,7 @@ public class KnightMoves
         return (h1 << 16) | (h1 >> 16) | (h2 << 8) | (h2 >> 8);
     }
 
-    public static void Generate(BoardState state, List<Move> moves)
+    public static void Generate(ref BoardState state, List<Move> moves)
     {
         ulong knights = state.IsWhiteTurn ? state.WhiteKnights : state.BlackKnights;
         ulong friendly = state.IsWhiteTurn ? state.WhitePieces : state.BlackPieces;

@@ -21,7 +21,7 @@ public class BoardManager : MonoBehaviour
     [SerializeField] private GameObject HighlightFromPrefab;
     [SerializeField] private GameObject HighlightToPrefab;
 
-    public List<ulong> PositionHistory { get; private set; } = new List<ulong>();
+    public Dictionary<ulong, int> PositionHistory { get; private set; } = new Dictionary<ulong, int>();
 
     private GameObject fromHighlight = null;
     private GameObject toHighlight = null;
@@ -66,21 +66,44 @@ public class BoardManager : MonoBehaviour
     {
         Debug.Log("Starting game");
 
+        PositionHistory.Clear();
+
         State = FenParser.Parse(OverrideFen) ?? throw new ArgumentNullException(nameof(OverrideFen));
 
         Stats.ResetStats();
         SyncVisuals();
 
+        RecordPosition(State.ZobristKey);
+
         ChessAgent startingAgent = State.IsWhiteTurn ? WhiteAgent : BlackAgent;
         startingAgent.StartTurn(State);
     }
 
+    private void RecordPosition(ulong key)
+    {
+        PositionHistory.TryGetValue(key, out int count);
+        PositionHistory[key] = count + 1;
+    }
+
+    private void RemovePosition(ulong key)
+    {
+        int count = PositionHistory[key] - 1;
+
+        if (count == 0) PositionHistory.Remove(key);
+        else PositionHistory[key] = count;
+    }
+
+    public bool IsThreefold() => PositionHistory.TryGetValue(State.ZobristKey, out int count) && count >= 3;
+
     public void MakeMove(Move move, ThinkStats? thinkStats = null)
     {
+        bool moveWasWhite = State.IsWhiteTurn;
+
         undoInfo = State.MakeMove(move);
 
+        RecordPosition(State.ZobristKey);
         SyncVisuals((move.From, move.To));
-        Stats.UpdateAgentStats(State.IsWhiteTurn, thinkStats);
+        Stats.UpdateAgentStats(moveWasWhite, thinkStats);
 
         GameResult? result = DetermineStatus();
 
@@ -92,8 +115,6 @@ public class BoardManager : MonoBehaviour
 
         ChessAgent nextAgent = State.IsWhiteTurn ? WhiteAgent : BlackAgent;
         nextAgent.StartTurn(State);
-
-        PositionHistory.Add(State.ZobristKey);
     }
 
     private GameResult? DetermineStatus()
@@ -108,21 +129,28 @@ public class BoardManager : MonoBehaviour
         }
         if (State.IsStalemate())
         {
-            Stats.draws += 1;
+            Stats.draws++;
             AudioS.PlayOneShot(EndClip);
             return new GameResult("Draw", "Stalemate", State.IsWhiteTurn ? State.FullMoveNumber - 1 : State.FullMoveNumber);
         }
         if (State.IsInsufficientMaterial())
         {
-            Stats.draws += 1;
+            Stats.draws++;
             AudioS.PlayOneShot(EndClip);
             return new GameResult("Draw", "Insufficient Material", State.IsWhiteTurn ? State.FullMoveNumber - 1 : State.FullMoveNumber);
         }
         if (State.IsFifty())
         {
-            Stats.draws += 1;
+            Stats.draws++;
             AudioS.PlayOneShot(EndClip);
             return new GameResult("Draw", "Fifty Move Rule", State.IsWhiteTurn ? State.FullMoveNumber - 1 : State.FullMoveNumber);
+        }
+        // Three-fold
+        if (PositionHistory.TryGetValue(State.ZobristKey, out int count) && count >= 3)
+        { 
+            Stats.draws++;
+            AudioS.PlayOneShot(EndClip);
+            return new GameResult("Draw", "Three-Fold Repetition", State.IsWhiteTurn ? State.FullMoveNumber - 1 : State.FullMoveNumber);
         }
 
         // Game continues

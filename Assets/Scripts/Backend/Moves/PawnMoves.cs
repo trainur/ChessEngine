@@ -47,7 +47,7 @@ public class PawnMoves
         return left | right;
     }
 
-    public static void Generate(BoardState state, List<Move> moves)
+    public static void Generate(ref BoardState state, List<Move> moves)
     {
         ulong pawns = state.IsWhiteTurn ? state.WhitePawns : state.BlackPawns;
         ulong opponent = state.IsWhiteTurn ? state.BlackPieces : state.WhitePieces;
@@ -67,7 +67,7 @@ public class PawnMoves
             {
                 int to = from + dir;
 
-                AddMove(from, to, moves, state);
+                AddMove(from, to, moves, in state);
 
                 // Double push
                 ulong doublePush = dir > 0
@@ -81,7 +81,7 @@ public class PawnMoves
             while (attacks != 0)
             {
                 int to = BitUtils.PopLsb(ref attacks);
-                AddMove(from, to, moves, state);
+                AddMove(from, to, moves, in state);
             }
 
             // En passant
@@ -91,7 +91,7 @@ public class PawnMoves
     }
 
     // Helper function for handling promotion moves
-    private static void AddMove(int from, int to, List<Move> moves, BoardState state)
+    private static void AddMove(int from, int to, List<Move> moves, in BoardState state)
     {
         int toRank = to / 8;
         if (toRank == 0 || toRank == 7)

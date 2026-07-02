@@ -81,8 +81,8 @@ public class PST_7 : ChessAgent
     protected override SearchResult ChooseMove(BoardState state)
     {
         positionHistory.Clear();
-        foreach (ulong key in PositionHistory)
-            RecordPosition(key);
+        //foreach (ulong key in PositionHistory)
+        //    RecordPosition(key);
 
         Move? bestMove = null;
         float bestScore = IsWhite ? float.NegativeInfinity : float.PositiveInfinity;

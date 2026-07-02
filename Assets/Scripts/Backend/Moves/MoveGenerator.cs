@@ -10,31 +10,31 @@ public class MoveGenerator
 
         // Generate pseduo-legal moves
         start = moves.Count;
-        PawnMoves.Generate(state, moves);
+        PawnMoves.Generate(ref state, moves);
         ValidateGeneratedMoves(state, moves, start, "PawnMoves");
 
         start = moves.Count;
-        KnightMoves.Generate(state, moves);
+        KnightMoves.Generate(ref state, moves);
         ValidateGeneratedMoves(state, moves, start, "KnightMoves");
 
         start = moves.Count;
-        BishopMoves.Generate(state, moves);
+        BishopMoves.Generate(ref state, moves);
         ValidateGeneratedMoves(state, moves, start, "BishopMoves");
 
         start = moves.Count;
-        RookMoves.Generate(state, moves);
+        RookMoves.Generate(ref state, moves);
         ValidateGeneratedMoves(state, moves, start, "RookMoves");
 
         start = moves.Count;
-        QueenMoves.Generate(state, moves);
+        QueenMoves.Generate(ref state, moves);
         ValidateGeneratedMoves(state, moves, start, "QueenMoves");
 
         start = moves.Count;
-        KingMoves.Generate(state, moves);
+        KingMoves.Generate(ref state, moves);
         ValidateGeneratedMoves(state, moves, start, "KingMoves");
 
         start = moves.Count;
-        GenerateCastling(state, moves);
+        GenerateCastling(ref state, moves);
         ValidateGeneratedMoves(state, moves, start, "Castling");
 
         // Filter for legal
@@ -114,7 +114,7 @@ public class MoveGenerator
             || (RookMoves.GetAttacks(occupied, sq) & rooksQueens) != 0;
     }
 
-    private static void GenerateCastling(BoardState state, List<Move> moves)
+    private static void GenerateCastling(ref BoardState state, List<Move> moves)
     {
         int kingSquare = state.IsWhiteTurn ? 4 : 60;
         bool kingSide = state.IsWhiteTurn ? state.WhiteKingsideCastle : state.BlackKingsideCastle;

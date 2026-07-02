@@ -35,7 +35,7 @@ public class KingMoves
         return l | r | ((l | r | bit) >> 8) | ((l | r | bit) << 8);
     }
 
-    public static void Generate(BoardState state, List<Move> moves)
+    public static void Generate(ref BoardState state, List<Move> moves)
     {
         ulong king = state.IsWhiteTurn ? state.WhiteKing : state.BlackKing;
         ulong friendly = state.IsWhiteTurn ? state.WhitePieces : state.BlackPieces;

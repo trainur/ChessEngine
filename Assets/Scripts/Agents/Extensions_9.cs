@@ -103,7 +103,6 @@ public class Extensions_9 : ChessAgent
 
         // phase is in [0, 24]. Blends opening and endgame evaluation
         // 0 = opening, 24 = endgame
-
         return Mathf.Clamp(phase, 0, TOTAL_PHASE);
     }
 
@@ -130,8 +129,8 @@ public class Extensions_9 : ChessAgent
     protected override SearchResult ChooseMove(BoardState state)
     {
         positionHistory.Clear();
-        foreach (ulong key in PositionHistory)
-            RecordPosition(key);
+        //foreach (ulong key in PositionHistory)
+        //    RecordPosition(key);
 
         Move? bestMove = null;
         int bestScore = IsWhite ? int.MinValue : int.MaxValue;

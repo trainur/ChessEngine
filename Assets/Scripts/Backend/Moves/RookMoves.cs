@@ -135,7 +135,7 @@ public class RookMoves
     }
 
     // useQueens param to make generating queen moves simple
-    public static void Generate(BoardState state, List<Move> moves, bool useQueens = false)
+    public static void Generate(ref BoardState state, List<Move> moves, bool useQueens = false)
     {
         ulong pieces = useQueens
             ? (state.IsWhiteTurn ? state.WhiteQueens : state.BlackQueens)

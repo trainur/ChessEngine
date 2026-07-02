@@ -126,8 +126,8 @@ public class Quiescence_8 : ChessAgent
     protected override SearchResult ChooseMove(BoardState state)
     {
         positionHistory.Clear();
-        foreach (ulong key in PositionHistory)
-            RecordPosition(key);
+        //foreach (ulong key in PositionHistory)
+        //    RecordPosition(key);
 
         Move? bestMove = null;
         int bestScore = IsWhite ? int.MinValue : int.MaxValue;

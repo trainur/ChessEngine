@@ -10,7 +10,8 @@ public abstract class ChessAgent : MonoBehaviour
     [SerializeField, Range(0f, 5f)] private float DelayTime = 0f;
     protected BoardManager Manager;
     protected int evaluatedStates;
-    protected List<ulong> PositionHistory => Manager.PositionHistory;
+    protected ulong[] PositionStack = new ulong[512];
+    protected int PositionStackCount;
     protected int MATE_SCORE = 1_000_000;
     public virtual int MateScore => MATE_SCORE;
     public virtual string Name => GetType().Name;
@@ -22,8 +23,30 @@ public abstract class ChessAgent : MonoBehaviour
     public virtual void StartTurn(BoardState state)
     {
         evaluatedStates = 0;
+
+        CopyPositionHistoryToStack();
+
         StartCoroutine(ThinkCoroutine(state));
     }
+
+    private void CopyPositionHistoryToStack()
+    {
+        PositionStackCount = 0;
+
+        foreach (KeyValuePair<ulong, int> pair in Manager.PositionHistory)
+            for (int i = 0; i < pair.Value; i++)
+                PushPosition(pair.Key);
+    }
+
+    protected void PushPosition(ulong zobristKey)
+    {
+        if (PositionStackCount >= PositionStack.Length) System.Array.Resize(ref PositionStack, PositionStack.Length * 2);
+
+        PositionStack[PositionStackCount] = zobristKey;
+        PositionStackCount++;
+    }
+
+    protected void PopPosition() => PositionStackCount--;
 
     protected virtual IEnumerator ThinkCoroutine(BoardState state)
     {
@@ -60,6 +83,51 @@ public abstract class ChessAgent : MonoBehaviour
     protected virtual void OnMoveChosen(Move move, ThinkStats thinkStats)
     {
         Manager.MakeMove(move, thinkStats);
+    }
+
+    protected int GetPositionOccurrenceCount(ulong zobristKey)
+    {
+        int count = 0;
+
+        // Step by 2 because only positions with the same side to move can repeat
+        for (int i = PositionStackCount - 1; i >= 0; i -= 2)
+        {
+            if (PositionStack[i] == zobristKey)
+                count++;
+        }
+
+        return count;
+    }
+
+    protected bool IsThreefold(ref BoardState state)
+    {
+        int count = 0;
+
+        // Step by 2 because only positions with the same side to move can repeat
+        // Rather than reuse GetPositionOccurenceCount, I've made a code smell. Just to allow early break outs for efficiency.
+        for (int i = PositionStackCount - 1; i >= 0; i -= 2)
+            if (PositionStack[i] == state.ZobristKey)
+            {
+                count++;
+
+                if (count >= 3)
+                    return true;
+            }
+
+        return false;
+    }
+
+    protected UndoInfo MakeSearchMove(ref BoardState state, Move move)
+    {
+        UndoInfo undo = state.MakeMove(move);
+        PushPosition(state.ZobristKey);
+        return undo;
+    }
+
+    protected void UnmakeSearchMove(ref BoardState state, Move move, UndoInfo undo)
+    {
+        PopPosition();
+        state.UnmakeMove(move, undo);
     }
 
     protected abstract SearchResult ChooseMove(BoardState state);
