@@ -1,7 +1,7 @@
 using System;
 public class FenParser
 {
-    private const string INITFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+    public const string INITFEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
     public static BoardState? Parse(string fen)
     {
@@ -80,5 +80,94 @@ public class FenParser
         int file = token[0] - 'a';
         int rank = token[1] - '1';
         state.EnPassantSquare = rank * 8 + file;
+    }
+
+    public static string ToFen(in BoardState state)
+    {
+        string board = BoardToFen(in state);
+        string turn = state.IsWhiteTurn ? "w" : "b";
+        string castling = CastlingToFen(in state);
+        string enPassant = state.EnPassantSquare == -1
+            ? "-"
+            : SquareToAlgebraic(state.EnPassantSquare);
+
+        return $"{board} {turn} {castling} {enPassant} {state.HalfMoveClock} {state.FullMoveNumber}";
+    }
+
+    private static string BoardToFen(in BoardState state)
+    {
+        System.Text.StringBuilder fen = new();
+
+        for (int rank = 7; rank >= 0; rank--)
+        {
+            int empty = 0;
+            for (int file = 0; file < 8; file++)
+            {
+                int sq = rank * 8 + file;
+                char piece = GetFenPieceAt(in state, sq);
+
+                if (piece == '\0') empty++;
+                else
+                {
+                    if (empty > 0)
+                    {
+                        fen.Append(empty);
+                        empty = 0;
+                    }
+
+                    fen.Append(piece);
+                }
+            }
+
+            if (empty > 0) fen.Append(empty);
+
+            if (rank > 0) fen.Append('/');
+        }
+
+        return fen.ToString();
+    }
+
+    private static char GetFenPieceAt(in BoardState state, int sq)
+    {
+        ulong mask = 1UL << sq;
+
+        if ((state.WhitePawns & mask) != 0) return 'P';
+        if ((state.WhiteKnights & mask) != 0) return 'N';
+        if ((state.WhiteBishops & mask) != 0) return 'B';
+        if ((state.WhiteRooks & mask) != 0) return 'R';
+        if ((state.WhiteQueens & mask) != 0) return 'Q';
+        if ((state.WhiteKing & mask) != 0) return 'K';
+
+        if ((state.BlackPawns & mask) != 0) return 'p';
+        if ((state.BlackKnights & mask) != 0) return 'n';
+        if ((state.BlackBishops & mask) != 0) return 'b';
+        if ((state.BlackRooks & mask) != 0) return 'r';
+        if ((state.BlackQueens & mask) != 0) return 'q';
+        if ((state.BlackKing & mask) != 0) return 'k';
+
+        return '\0';
+    }
+
+    private static string CastlingToFen(in BoardState state)
+    {
+        string castling = "";
+
+        if (state.WhiteKingsideCastle) castling += "K";
+        if (state.WhiteQueensideCastle) castling += "Q";
+        if (state.BlackKingsideCastle) castling += "k";
+        if (state.BlackQueensideCastle) castling += "q";
+
+        return castling.Length == 0 ? "-" : castling;
+    }
+
+    private static string SquareToAlgebraic(int square)
+    {
+        int file = square % 8;
+        int rank = square / 8;
+
+        char fileChar = (char)('a' + file);
+        char rankChar = (char)('1' + rank);
+
+        return $"{fileChar}{rankChar}";
     }
 }

@@ -2,11 +2,17 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
+using Random = UnityEngine.Random;
 
 public class BoardManager : MonoBehaviour
 {
-    [SerializeField] private string OverrideFen;
     [SerializeField] private GameObject[] PiecePrefabs;
+
+    [Header("Starting Position")]
+    [SerializeField] private string OverrideFen;
+    [SerializeField] private bool UseRandomPositions;
+    [SerializeField] private string[] RandomFens;
 
     [Header("Game Agents")]
     [SerializeField] private ChessAgent WhiteAgent;
@@ -68,7 +74,9 @@ public class BoardManager : MonoBehaviour
 
         PositionHistory.Clear();
 
-        State = FenParser.Parse(OverrideFen) ?? throw new ArgumentNullException(nameof(OverrideFen));
+        string fen = GetStartingFen();
+
+        State = FenParser.Parse(fen) ?? throw new ArgumentNullException(nameof(fen));
 
         Stats.ResetStats();
         SyncVisuals();
@@ -77,6 +85,15 @@ public class BoardManager : MonoBehaviour
 
         ChessAgent startingAgent = State.IsWhiteTurn ? WhiteAgent : BlackAgent;
         startingAgent.StartTurn(State);
+    }
+
+    private string GetStartingFen()
+    {
+        if (!string.IsNullOrWhiteSpace(OverrideFen)) return OverrideFen;
+
+        if (UseRandomPositions && RandomFens != null && RandomFens.Length > 0) return RandomFens[Random.Range(0, RandomFens.Length)]; // Random fen strings are selected without replacement
+
+        return FenParser.INITFEN;
     }
 
     private void RecordPosition(ulong key)
@@ -212,7 +229,7 @@ public class BoardManager : MonoBehaviour
     private void SpawnPiece(int file, int rank, int prefabIndex)
     {
         GameObject prefab = PiecePrefabs[prefabIndex];
-        if (prefab == null) throw new System.ArgumentException($"Invalid piece prefab index recieved: {prefabIndex}");
+        if (prefab == null) throw new ArgumentException($"Invalid piece prefab index recieved: {prefabIndex}");
 
         int childIndex = (7 - rank) * 8 + file;
         Transform cell = BoardHandler.GetSquare(file, rank);
@@ -260,6 +277,9 @@ public class BoardManager : MonoBehaviour
         pieceObjects = new GameObject[8, 8];
         SpawnAllPieces();
     }
+
+    public GameObject GetPieceObjectOnSquare(int sq) => GetPieceObjectOnSquare(sq % 8, sq / 8);
+    public GameObject GetPieceObjectOnSquare(int file, int rank) => pieceObjects[file, rank];
 }
 
 public struct GameResult

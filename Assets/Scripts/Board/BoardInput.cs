@@ -3,9 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
-public class BoardInput : MonoBehaviour, IPointerClickHandler
+public class BoardInput : MonoBehaviour, IPointerClickHandler, IBeginDragHandler, IDragHandler, IEndDragHandler
 {
     public event Action<Move> MoveChosen;
 
@@ -15,10 +16,19 @@ public class BoardInput : MonoBehaviour, IPointerClickHandler
     [SerializeField] private Button KnightButton, BishopButton, RookButton, QueenButton;
     [SerializeField] private RectTransform BoardTransform;
 
+    [Header("Cursors")]
+    [SerializeField] private Texture2D NormalCursor;
+    [SerializeField] private Texture2D SelectableCursor;
+
+    private bool? cursorIsSelectable = null;
+
     private bool inputEnabled;
     private bool awaitingPromotion;
 
     private bool hasPieceSelected;
+
+    private bool isDraggingPiece;
+    private bool suppressNextClick;
 
     private BoardState currentState;
     private List<Move> possibleMoves = new();
@@ -28,6 +38,12 @@ public class BoardInput : MonoBehaviour, IPointerClickHandler
 
     private Canvas Canvas;
     private ChessboardImageCreator BoardHandler;
+
+    [SerializeField, Range(0f, 1f)] private float GhostTransparency = 0.6f;
+
+    private Image draggedOriginalImage;
+    private Image draggedGhostImage;
+    private RectTransform draggedGhostRect;
 
     void Awake()
     {
@@ -43,6 +59,43 @@ public class BoardInput : MonoBehaviour, IPointerClickHandler
         BoardHandler = GetComponent<ChessboardImageCreator>();
     }
 
+    private void Start() => SetSelectableCursor(false);
+
+    private void Update()
+    {
+        if (!inputEnabled || awaitingPromotion)
+        {
+            SetSelectableCursor(false);
+            return;
+        }
+
+        if (Mouse.current == null)
+        {
+            SetSelectableCursor(false);
+            return;
+        }
+
+        int sq = GetBoardPosition(Mouse.current.position.ReadValue());
+
+        bool hoveringSelectablePiece = sq != -1 && currentState.IsPieceActive(sq);
+
+        bool hoveringLegalMove = sq != -1 && hasPieceSelected && possibleMoves.Any(move => move.To == sq);
+
+        SetSelectableCursor(hoveringSelectablePiece || hoveringLegalMove);
+    }
+
+    private void SetSelectableCursor(bool selectable)
+    {
+        // Avoid unneccesary changing
+        if (cursorIsSelectable.HasValue && cursorIsSelectable.Value == selectable) return;
+
+        cursorIsSelectable = selectable;
+
+        Texture2D cursor = selectable ? SelectableCursor : NormalCursor;
+
+        Cursor.SetCursor(cursor, Vector2.zero, CursorMode.Auto);
+    }
+
     public void SetUserInputEnabled(bool enabled, BoardState? state = null)
     {
         inputEnabled = enabled;
@@ -53,12 +106,69 @@ public class BoardInput : MonoBehaviour, IPointerClickHandler
         {
             Deselect();
             awaitingPromotion = false;
+            SetSelectableCursor(false);
+
             if (PromotionPanel != null) PromotionPanel.SetActive(false);
         }
     }
 
+    public void OnBeginDrag(PointerEventData eventData)
+    {
+        if (!inputEnabled || awaitingPromotion) return;
+
+        int sq = GetBoardPosition(eventData.position);
+
+        if (sq == -1 || !currentState.IsPieceActive(sq)) return;
+
+        Deselect();
+
+        draggedOriginalImage = GetPieceImageOnSquare(sq);
+
+        if (draggedOriginalImage == null) return;
+
+        SetImageAlpha(draggedOriginalImage, GhostTransparency);
+        CreateDraggedGhost(draggedOriginalImage, eventData.position);
+
+        SelectPiece(sq);
+
+        isDraggingPiece = true;
+        suppressNextClick = true;
+    }
+
+    public void OnDrag(PointerEventData eventData)
+    {
+        if (!isDraggingPiece || draggedGhostRect == null) return;
+
+        draggedGhostRect.position = eventData.position;
+    }
+
+    public void OnEndDrag(PointerEventData eventData)
+    {
+        if (!isDraggingPiece) return;
+
+        isDraggingPiece = false;
+
+        if (draggedOriginalImage != null) SetImageAlpha(draggedOriginalImage, 1f);
+
+        if (draggedGhostImage != null) Destroy(draggedGhostImage.gameObject);
+
+        draggedOriginalImage = null;
+        draggedGhostImage = null;
+        draggedGhostRect = null;
+
+        int sq = GetBoardPosition(eventData.position);
+        TryChooseMoveTo(sq);
+    }
+
     public void OnPointerClick(PointerEventData eventData)
     {
+        // Ignore release of click if we are dragging
+        if (suppressNextClick)
+        {
+            suppressNextClick = false;
+            return;
+        }
+
         if (!inputEnabled || awaitingPromotion) return;
 
         // Anything other than left click - deselect
@@ -70,6 +180,11 @@ public class BoardInput : MonoBehaviour, IPointerClickHandler
 
         int sq = GetBoardPosition(eventData.position);
 
+        TryChooseMoveTo(sq);
+    }
+
+    private void TryChooseMoveTo(int sq)
+    {
         // Click is off board
         if (sq == -1)
         {
@@ -120,6 +235,7 @@ public class BoardInput : MonoBehaviour, IPointerClickHandler
             Deselect();
         }
     }
+
     private int GetBoardPosition(Vector2 screenPos)
     {
         // Use the canvas camera for Screen Space - Camera, null for Overlay
@@ -258,4 +374,53 @@ public class BoardInput : MonoBehaviour, IPointerClickHandler
         DestroyImmediate(SelectionHighlightObject);
         SelectionHighlightObject = null;
     }
+
+
+    private Image GetPieceImageOnSquare(int sq)
+    {
+        int file = sq % 8;
+        int rank = sq / 8;
+
+        Transform square = BoardHandler.GetSquare(file, rank);
+
+        if (square == null)
+            return null;
+
+        foreach (Transform child in square)
+        {
+            Image image = child.GetComponent<Image>();
+
+            if (image != null && image.sprite != null)
+                return image;
+        }
+
+        return null;
+    }
+
+    private void CreateDraggedGhost(Image sourceImage, Vector2 screenPosition)
+    {
+        GameObject ghost = new GameObject("Drag_Ghost");
+
+        ghost.transform.SetParent(Canvas.transform, false);
+
+        draggedGhostImage = ghost.AddComponent<Image>();
+        draggedGhostImage.sprite = sourceImage.sprite;
+        draggedGhostImage.color = Color.white;
+        draggedGhostImage.raycastTarget = false;
+        draggedGhostImage.preserveAspect = true;
+
+        draggedGhostRect = ghost.GetComponent<RectTransform>();
+
+        RectTransform sourceRect = sourceImage.GetComponent<RectTransform>();
+        draggedGhostRect.sizeDelta = sourceRect.rect.size;
+        draggedGhostRect.position = screenPosition;
+    }
+
+    private void SetImageAlpha(Image image, float alpha)
+    {
+        Color c = image.color;
+        c.a = alpha;
+        image.color = c;
+    }
+
 }

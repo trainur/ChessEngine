@@ -158,7 +158,7 @@ public class StatsHandler : MonoBehaviour
                 int remainingDepth = Math.Abs(score) - Agent.MateScore;
 
                 int rootDepth = Agent.SearchDepth ?? remainingDepth;
-                int mateInPlies = Math.Max(1, rootDepth - remainingDepth);
+                int mateInPlies = Math.Max(0, rootDepth - remainingDepth);
                 int mateInMoves = (int)Math.Ceiling(mateInPlies / 2f);
 
                 return score > 0 ? $"+M{mateInMoves}" : $"-M{mateInMoves}";
