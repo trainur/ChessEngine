@@ -1,6 +1,7 @@
 using System;
 using TMPro;
 using UnityEngine;
+using System.Collections;
 
 public class StatsHandler : MonoBehaviour
 {
@@ -20,6 +21,9 @@ public class StatsHandler : MonoBehaviour
 
     private ChessAgent WhiteAgent;
     private ChessAgent BlackAgent;
+
+    private Coroutine whiteThinkingCoroutine;
+    private Coroutine blackThinkingCoroutine;
 
     private void Update()
     {
@@ -56,9 +60,50 @@ public class StatsHandler : MonoBehaviour
     public void UpdateGameStats(GameResult gameResult)
     {
         ScoreText.text = $"{whiteWins} - {draws} - {blackWins}";
-        ReasonText.text = $"<color=#a9a9a9>Reason:</color> {gameResult.Reason}";
-        WinnerText.text = $"<color=#a9a9a9>Winner:</color> {gameResult.Winner}";
-        MovesText.text = $"<color=#a9a9a9>Moves:</color> {gameResult.MoveCount}";
+        ReasonText.text = $"<color=#a9a9a9>Reason:</color> <b>{gameResult.Reason}</b>";
+        WinnerText.text = $"<color=#a9a9a9>Winner:</color> <b>{gameResult.Winner}</b>";
+        MovesText.text = $"<color=#a9a9a9>Moves:</color> <b>{gameResult.MoveCount}</b>";
+    }
+
+    public void StartThinking(bool isWhite)
+    {
+        if (isWhite)
+        {
+            if (whiteThinkingCoroutine != null) StopCoroutine(whiteThinkingCoroutine);
+            whiteThinkingCoroutine = StartCoroutine(ThinkingAnimation(WhiteStats));
+        }
+        else
+        {
+            if (blackThinkingCoroutine != null) StopCoroutine(blackThinkingCoroutine);
+            blackThinkingCoroutine = StartCoroutine(ThinkingAnimation(BlackStats));
+        }
+    }
+
+    public void StopThinking(bool isWhite)
+    {
+        if (isWhite)
+        {
+            if (whiteThinkingCoroutine != null) StopCoroutine(whiteThinkingCoroutine);
+            whiteThinkingCoroutine = null;
+        }
+        else
+        {
+            if (blackThinkingCoroutine != null) StopCoroutine(blackThinkingCoroutine);
+            blackThinkingCoroutine = null;
+        }
+    }
+
+    private IEnumerator ThinkingAnimation(AgentStatsPanel panel)
+    {
+        string[] frames = { "Thinking.  ", "Thinking.. ", "Thinking..." };
+        int i = 0;
+
+        while (true)
+        {
+            panel.StartThinkingText(frames[i % frames.Length]);
+            i++;
+            yield return new WaitForSeconds(0.4f);
+        }
     }
 
     [Serializable]
@@ -74,6 +119,7 @@ public class StatsHandler : MonoBehaviour
         private ChessAgent Agent;
         private string SideName;
 
+        private string lastAvgTime = null;
 
         private int? lastDepth;
         private float totalThinkTime;
@@ -113,17 +159,27 @@ public class StatsHandler : MonoBehaviour
             SetLine(DepthText, "Search Depth", depthText);
         }
 
+        public void StartThinkingText(string text)
+        {
+            string avg = lastAvgTime != null
+                ? $" <color=#9AA3B2>(avg {lastAvgTime}s)</color>"
+                : "";
+
+            SetLine(ThinkTimeText, "Think Time", text + avg);
+        }
+
         public void SetStats(ThinkStats stats)
         {
             thinkCount++;
             totalThinkTime += stats.ThinkTime;
 
             float averageThinkTime = totalThinkTime / thinkCount;
+            lastAvgTime = $"{averageThinkTime:F3}s";
 
             SetLine(
                 ThinkTimeText,
                 "Think Time",
-                $"{stats.ThinkTime:F3}s <color=#9AA3B2>(avg {averageThinkTime:F3}s)</color>"
+                $"{stats.ThinkTime:F3}s <color=#9AA3B2>(avg {lastAvgTime})</color>"
             );
 
             SetLine(
@@ -158,7 +214,7 @@ public class StatsHandler : MonoBehaviour
                 int remainingDepth = Math.Abs(score) - Agent.MateScore;
 
                 int rootDepth = Agent.SearchDepth ?? remainingDepth;
-                int mateInPlies = Math.Max(0, rootDepth - remainingDepth);
+                int mateInPlies = Math.Max(1, rootDepth - remainingDepth);
                 int mateInMoves = (int)Math.Ceiling(mateInPlies / 2f);
 
                 return score > 0 ? $"+M{mateInMoves}" : $"-M{mateInMoves}";

@@ -89,8 +89,7 @@ public abstract class ChessAgent : MonoBehaviour
     {
         int count = 0;
 
-        // Step by 2 because only positions with the same side to move can repeat
-        for (int i = PositionStackCount - 1; i >= 0; i -= 2)
+        for (int i = PositionStackCount - 1; i >= 0; i--)
         {
             if (PositionStack[i] == zobristKey)
                 count++;
@@ -105,7 +104,7 @@ public abstract class ChessAgent : MonoBehaviour
 
         // Step by 2 because only positions with the same side to move can repeat
         // Rather than reuse GetPositionOccurenceCount, I've made a code smell. Just to allow early break outs for efficiency.
-        for (int i = PositionStackCount - 1; i >= 0; i -= 2)
+        for (int i = PositionStackCount - 1; i >= 0; i--)
             if (PositionStack[i] == state.ZobristKey)
             {
                 count++;
@@ -136,6 +135,7 @@ public abstract class ChessAgent : MonoBehaviour
 public class HumanAgent : ChessAgent
 {
     private BoardInput Input;
+    private Stopwatch stopwatch; // Not needed at all for humans, but might as well
 
     protected override void Awake()
     {
@@ -145,19 +145,31 @@ public class HumanAgent : ChessAgent
 
     public override void StartTurn(BoardState state)
     {
-        Input.SetUserInputEnabled(true, state);
+        stopwatch = Stopwatch.StartNew();
+
+        Input.MoveChosen -= OnMoveChosen; // prevent duplicates
         Input.MoveChosen += OnMoveChosen;
+
+        Input.SetUserInputEnabled(true, state);
     }
 
     private void OnMoveChosen(Move move)
     {
+        stopwatch.Stop();
+
         Input.MoveChosen -= OnMoveChosen;
         Input.SetUserInputEnabled(false);
-        Manager.MakeMove(move, null);
+
+        ThinkStats thinkStats = new ThinkStats(
+            (float)stopwatch.Elapsed.TotalSeconds,
+            0,
+            null);
+
+        Manager.MakeMove(move, thinkStats);
     }
 
     // Bypass ChooseMove as HumanAgent clearly isn't an AI and shouldn't run the AI agent pipeline.
-    protected override SearchResult ChooseMove(BoardState state) => default;
+    protected override SearchResult ChooseMove(BoardState state) => throw new System.NotSupportedException("Human agents must not use the ChooseMove agent pipeline.");
 }
 
 public readonly struct ThinkStats

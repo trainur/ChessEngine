@@ -27,6 +27,8 @@ public class BoardManager : MonoBehaviour
     [SerializeField] private GameObject HighlightFromPrefab;
     [SerializeField] private GameObject HighlightToPrefab;
 
+    private const int PERFT_TEST_DEPTH = 6;
+
     public Dictionary<ulong, int> PositionHistory { get; private set; } = new Dictionary<ulong, int>();
 
     private GameObject fromHighlight = null;
@@ -78,11 +80,15 @@ public class BoardManager : MonoBehaviour
 
         State = FenParser.Parse(fen) ?? throw new ArgumentNullException(nameof(fen));
 
+        // Perft test
+        if (fen == FenParser.INITFEN) Perft.PerftTestUpToDepth(this, PERFT_TEST_DEPTH, State);
+
         Stats.ResetStats();
         SyncVisuals();
 
         RecordPosition(State.ZobristKey);
 
+        Stats.StartThinking(State.IsWhiteTurn);
         ChessAgent startingAgent = State.IsWhiteTurn ? WhiteAgent : BlackAgent;
         startingAgent.StartTurn(State);
     }
@@ -116,6 +122,8 @@ public class BoardManager : MonoBehaviour
     {
         bool moveWasWhite = State.IsWhiteTurn;
 
+        Stats.StopThinking(moveWasWhite);
+
         undoInfo = State.MakeMove(move);
 
         RecordPosition(State.ZobristKey);
@@ -129,6 +137,8 @@ public class BoardManager : MonoBehaviour
             OnGameEnd(result.Value);
             return;
         }
+
+        Stats.StartThinking(State.IsWhiteTurn);
 
         ChessAgent nextAgent = State.IsWhiteTurn ? WhiteAgent : BlackAgent;
         nextAgent.StartTurn(State);

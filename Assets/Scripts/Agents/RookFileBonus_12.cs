@@ -5,7 +5,7 @@ using UnityEngine;
 // More conditions to extensions
 // https://www.chessprogramming.org/Principal_Variation
 
-public class IterativeDeepening_11 : ChessAgent
+public class RookFileBonus_12 : ChessAgent
 {
     [SerializeField, Range(1,15)] private int searchDepth = 5;
     public override int? SearchDepth => searchDepth;
@@ -518,6 +518,30 @@ public class IterativeDeepening_11 : ChessAgent
         int blackBlockedPawns = BitUtils.PopCount(blackBlockedPawnMask);
         int blackBlockedPawnPenalty = blackBlockedPawns * BLOCKED_PAWN_PENALTY;
 
+        // Rook File Bonus
+        int RookFileBonus(ulong rooks, ulong friendlyPawns, ulong enemyPawns)
+        {
+            int bonus = 0;
+            ulong bb = rooks;
+
+            while (bb != 0)
+            {
+                int sq = BitUtils.PopLsb(ref bb);
+                ulong fileMask = AFile << (sq % 8);
+
+                bool noFriendlyPawns = (fileMask & friendlyPawns) == 0;
+                bool noEnemyPawns = (fileMask & enemyPawns) == 0;
+
+                if (noFriendlyPawns && noEnemyPawns) bonus += 25; // Open File
+                else if (noFriendlyPawns) bonus += 10; // Semi-Open File
+            }
+
+            return bonus;
+        }
+
+        int whiteRookFileBonus = RookFileBonus(state.WhiteRooks, state.WhitePawns, state.BlackPawns);
+        int blackRookFileBonus = RookFileBonus(state.BlackRooks, state.BlackPawns, state.WhitePawns);
+
         int eval = whiteMaterialScore
                     - blackMaterialScore
                     - whiteStackedPawnPenalty
@@ -525,7 +549,9 @@ public class IterativeDeepening_11 : ChessAgent
                     + whitePST
                     - blackPST
                     - whiteBlockedPawnPenalty
-                    + blackBlockedPawnPenalty;
+                    + blackBlockedPawnPenalty
+                    + whiteRookFileBonus
+                    - blackRookFileBonus;
 
         return state.IsWhiteTurn ? eval : -eval;
             

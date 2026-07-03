@@ -82,7 +82,7 @@ public class BoardInput : MonoBehaviour, IPointerClickHandler, IBeginDragHandler
 
         bool hoveringLegalMove = sq != -1 && hasPieceSelected && possibleMoves.Any(move => move.To == sq);
 
-        SetSelectableCursor(hoveringSelectablePiece || hoveringLegalMove);
+        SetSelectableCursor(hoveringSelectablePiece || hoveringLegalMove || isDraggingPiece);
     }
 
     private void SetSelectableCursor(bool selectable)
