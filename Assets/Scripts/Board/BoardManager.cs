@@ -27,7 +27,8 @@ public class BoardManager : MonoBehaviour
     [SerializeField] private GameObject HighlightFromPrefab;
     [SerializeField] private GameObject HighlightToPrefab;
 
-    private const int PERFT_TEST_DEPTH = 6;
+    private bool hasPerfTested = false;
+    private const int PERFT_TEST_DEPTH = 9;
 
     public Dictionary<ulong, int> PositionHistory { get; private set; } = new Dictionary<ulong, int>();
 
@@ -81,7 +82,8 @@ public class BoardManager : MonoBehaviour
         State = FenParser.Parse(fen) ?? throw new ArgumentNullException(nameof(fen));
 
         // Perft test
-        if (fen == FenParser.INITFEN) Perft.PerftTestUpToDepth(this, PERFT_TEST_DEPTH, State);
+        if (!hasPerfTested && fen == FenParser.INITFEN) Perft.PerftTestUpToDepth(this, PERFT_TEST_DEPTH, State);
+        hasPerfTested = true;
 
         Stats.ResetStats();
         SyncVisuals();

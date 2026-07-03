@@ -56,11 +56,27 @@ public static class Perft
     {
         if (depth < 0 || depth >= DepthNodes.Length) throw new ArgumentOutOfRangeException(nameof(depth));
 
-        Debug.Log("Perft testing, please wait.");
+        Debug.Log("Background perft testing in progress.");
+
+        yield return null;
 
         for (int i = 0; i <= depth; i++)
         {
-            ulong ac = PerftTest(i, ref state);
+            int testDepth = i;
+            BoardState stateCopy = state;
+
+            Task<ulong> task = Task.Run(() =>
+            {
+                return PerftTest(testDepth, ref stateCopy);
+            });
+
+            while (!task.IsCompleted)
+                yield return null;
+
+            if (task.IsFaulted)
+                throw task.Exception;
+
+            ulong ac = task.Result;
             ulong exp = DepthNodes[i];
 
             if (ac != exp) throw new InvalidOperationException($"Perft failed at depth {i}. Expected {exp:N0}, got {ac:N0}");
