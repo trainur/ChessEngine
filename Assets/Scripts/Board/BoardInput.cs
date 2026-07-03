@@ -26,6 +26,7 @@ public class BoardInput : MonoBehaviour, IPointerClickHandler, IBeginDragHandler
     private bool awaitingPromotion;
 
     private bool hasPieceSelected;
+    private int selectedSquare = -1;
 
     private bool isDraggingPiece;
     private bool suppressNextClick;
@@ -157,7 +158,7 @@ public class BoardInput : MonoBehaviour, IPointerClickHandler, IBeginDragHandler
         draggedGhostRect = null;
 
         int sq = GetBoardPosition(eventData.position);
-        TryChooseMoveTo(sq);
+        TryMoveTo(sq);
     }
 
     public void OnPointerClick(PointerEventData eventData)
@@ -183,57 +184,67 @@ public class BoardInput : MonoBehaviour, IPointerClickHandler, IBeginDragHandler
         TryChooseMoveTo(sq);
     }
 
-    private void TryChooseMoveTo(int sq)
+    private bool ClickOffBoard(int sq) => sq == -1;
+
+    private bool TryChoose(int sq)
     {
-        // Click is off board
-        if (sq == -1)
+        if (ClickOffBoard(sq))
+        {
+            Deselect();
+            return true;
+        }
+
+        if (!currentState.IsPieceActive(sq)) return false;
+
+        // Selected own piece -> Deselect
+        if (hasPieceSelected && sq == selectedSquare)
+        {
+            Deselect();
+            return true;
+        }
+
+        // Selected other owned piece -> Select
+        if (hasPieceSelected) Deselect();
+        SelectPiece(sq);
+
+        return true;
+    }
+
+    private void TryMoveTo(int sq)
+    {
+        Move? move = null;
+        foreach (Move possibleMove in possibleMoves)
+        {
+            if (possibleMove.To == sq)
+            {
+                move = possibleMove;
+                break;
+            }
+        }
+
+        // Square selected not a legal move
+        if (!move.HasValue)
         {
             Deselect();
             return;
         }
 
-        if (!hasPieceSelected && currentState.IsPieceActive(sq))
+        // Promotion handling
+        if (move.Value.IsPromotion())
         {
-            SelectPiece(sq);
+            awaitingPromotion = true;
+            ShowPromotionPanel(sq);
+            return; // Promotion panel will make move itself
         }
-        else
-        {
-            // First check if square selected contains piece of active colour. Enables more fluid feedback of selecting pieces
-            if (currentState.IsPieceActive(sq))
-            {
-                Deselect();
-                SelectPiece(sq);
-                return;
-            }
 
-            // Othwerwise check if player has selected a valid move
-            Move? move = null;
-            foreach (Move possibleMove in possibleMoves)
-            {
-                if (possibleMove.To == sq)
-                {
-                    move = possibleMove;
-                    break;
-                }
-            }
+        MoveChosen?.Invoke(move.Value);
+        Deselect();
+    }
 
-            if (!move.HasValue)
-            {
-                Deselect();
-                return;
-            }
-
-            // Promotion handling
-            if (move.Value.IsPromotion())
-            {
-                awaitingPromotion = true;
-                ShowPromotionPanel(sq);
-                return; // Promotion panel will make move itself
-            }
-
-            MoveChosen?.Invoke(move.Value);
-            Deselect();
-        }
+    private void TryChooseMoveTo(int sq)
+    {
+        if (TryChoose(sq)) return;
+        TryMoveTo(sq);
     }
 
     private int GetBoardPosition(Vector2 screenPos)
@@ -263,6 +274,8 @@ public class BoardInput : MonoBehaviour, IPointerClickHandler, IBeginDragHandler
     private void SelectPiece(int sq)
     {
         hasPieceSelected = true;
+        selectedSquare = sq;
+
         // Lazy workaround, but we can just generate all possible moves and filter for the selected square
         // Negligible performance difference with this use case
         possibleMoves = MoveGenerator.GenerateMoves(ref currentState).Where(move => move.From == sq).ToList();
@@ -280,6 +293,7 @@ public class BoardInput : MonoBehaviour, IPointerClickHandler, IBeginDragHandler
         RemovePossibleMovePositionsVisual();
         RemoveHighlight();
         hasPieceSelected = false;
+        selectedSquare = -1;
         possibleMoves = new();
     }
 

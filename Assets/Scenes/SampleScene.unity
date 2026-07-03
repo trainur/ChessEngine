@@ -2181,7 +2181,7 @@ RectTransform:
   m_AnchorMin: {x: 1, y: 0.5}
   m_AnchorMax: {x: 1, y: 0.5}
   m_AnchoredPosition: {x: -60, y: 0}
-  m_SizeDelta: {x: 1039.5619, y: 1039.5619}
+  m_SizeDelta: {x: 575, y: 575}
   m_Pivot: {x: 1, y: 0.5}
 --- !u!114 &267980615
 MonoBehaviour:
@@ -8653,7 +8653,7 @@ MonoBehaviour:
   m_ChildAlignment: 0
   m_StartCorner: 0
   m_StartAxis: 0
-  m_CellSize: {x: 129.94524, y: 129.94524}
+  m_CellSize: {x: 71.875, y: 71.875}
   m_Spacing: {x: 0, y: 0}
   m_Constraint: 1
   m_ConstraintCount: 8
@@ -8685,6 +8685,9 @@ MonoBehaviour:
   RookButton: {fileID: 1218447085}
   QueenButton: {fileID: 1922262175}
   BoardTransform: {fileID: 1931268928}
+  NormalCursor: {fileID: 2800000, guid: 042533ea592f9614884cdb16fe7d2c88, type: 3}
+  SelectableCursor: {fileID: 2800000, guid: 48e3410008abdc741a900637ffcffbc7, type: 3}
+  GhostTransparency: 0.6
 --- !u!114 &1931268936
 MonoBehaviour:
   m_ObjectHideFlags: 0
