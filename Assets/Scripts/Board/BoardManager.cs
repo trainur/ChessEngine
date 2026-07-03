@@ -2,7 +2,6 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.UI;
 using Random = UnityEngine.Random;
 
 public class BoardManager : MonoBehaviour
@@ -26,6 +25,9 @@ public class BoardManager : MonoBehaviour
     [Header("Highlights")]
     [SerializeField] private GameObject HighlightFromPrefab;
     [SerializeField] private GameObject HighlightToPrefab;
+
+    [SerializeField] private bool UpdateVisuals = true;
+    [SerializeField] private bool UpdateStatsUI = true;
 
     private bool hasPerfTested = false;
     private const int PERFT_TEST_DEPTH = 9;
