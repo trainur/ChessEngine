@@ -2,7 +2,9 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
+using System.Threading;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 
 public abstract class ChessAgent : MonoBehaviour
 {
@@ -10,6 +12,7 @@ public abstract class ChessAgent : MonoBehaviour
     [SerializeField, Range(0f, 5f)] private float DelayTime = 0f;
     protected BoardManager Manager;
     protected int evaluatedStates;
+    protected int nodeCheckCounter;
     protected ulong[] PositionStack = new ulong[512];
     protected int PositionStackCount;
     protected int MATE_SCORE = 1_000_000;
@@ -20,13 +23,47 @@ public abstract class ChessAgent : MonoBehaviour
 
     public virtual int? SearchDepth => null;
 
-    public virtual void StartTurn(BoardState state)
+    protected float? RemainingTime;
+    protected float Increment;
+
+    private Coroutine thinkCoroutine;
+    private CancellationTokenSource cts;
+
+    public virtual void StartTurn(BoardState state, float? remainingTime = null, float incrementSeconds = 0f)
     {
+        Debug.Log(
+        $"[AGENT START] " +
+        $"Unity time={Time.unscaledTime:F3}, " +
+        $"side={(IsWhite ? "White" : "Black")}, " +
+        $"remaining={remainingTime:F3}"
+    );
+
         evaluatedStates = 0;
+        nodeCheckCounter = 0;
+        RemainingTime = remainingTime;
+        Increment = incrementSeconds;
 
         CopyPositionHistoryToStack();
 
-        StartCoroutine(ThinkCoroutine(state));
+        cts = new CancellationTokenSource();
+
+        thinkCoroutine = StartCoroutine(ThinkCoroutine(state));
+    }
+
+    public virtual void AbortTurn()
+    {
+        cts?.Cancel();
+
+        if (thinkCoroutine != null)
+        {
+            StopCoroutine(thinkCoroutine);
+            thinkCoroutine = null;
+        }
+    }
+
+    protected void CheckCancellation(CancellationToken ct)
+    {
+        if ((++nodeCheckCounter & 1023) == 0) ct.ThrowIfCancellationRequested();
     }
 
     private void CopyPositionHistoryToStack()
@@ -50,25 +87,35 @@ public abstract class ChessAgent : MonoBehaviour
 
     protected virtual IEnumerator ThinkCoroutine(BoardState state)
     {
+        Stopwatch turnStopwatch = Stopwatch.StartNew();
+
         // Let frame render first
         yield return null;
 
         // Think delay
         yield return new WaitForSeconds(DelayTime);
 
+        if (RemainingTime.HasValue)
+        {
+            RemainingTime = Mathf.Max(0f, RemainingTime.Value - (float)turnStopwatch.Elapsed.TotalSeconds);
+        }
+
         Stopwatch stopwatch = Stopwatch.StartNew();
 
-        Task<SearchResult> searchTask = Task.Run(() => ChooseMove(state));
+        CancellationToken cancelToken = cts.Token;
+
+        Task<SearchResult> searchTask = Task.Run(() => ChooseMove(state, cancelToken), cancelToken);
 
         // Yield each frame until search is complete
         while (!searchTask.IsCompleted) yield return null;
+
+        // Cancelled tasks expected, throw quietly
+        if (searchTask.IsCanceled) yield break;
 
         // Rethrow any exceptions from the backgrond thread
         if (searchTask.IsFaulted) throw searchTask.Exception;
 
         stopwatch.Stop();
-
-        float elapsed = (float)stopwatch.Elapsed.TotalSeconds;
 
         SearchResult result = searchTask.Result;
 
@@ -129,7 +176,7 @@ public abstract class ChessAgent : MonoBehaviour
         state.UnmakeMove(move, undo);
     }
 
-    protected abstract SearchResult ChooseMove(BoardState state);
+    protected abstract SearchResult ChooseMove(BoardState state, CancellationToken cancellationToken);
 }
 
 public class HumanAgent : ChessAgent
@@ -143,8 +190,11 @@ public class HumanAgent : ChessAgent
         Input = GetComponent<BoardInput>();
     }
 
-    public override void StartTurn(BoardState state)
+    public override void StartTurn(BoardState state, float? remainingTime = null, float incrementSeconds = 0f)
     {
+        RemainingTime = remainingTime;
+        Increment = incrementSeconds;
+
         stopwatch = Stopwatch.StartNew();
 
         Input.MoveChosen -= OnMoveChosen; // prevent duplicates
@@ -167,9 +217,16 @@ public class HumanAgent : ChessAgent
 
         Manager.MakeMove(move, thinkStats);
     }
+    public override void AbortTurn()
+    {
+        stopwatch?.Stop();
+
+        Input.MoveChosen -= OnMoveChosen;
+        Input.SetUserInputEnabled(false);
+    }
 
     // Bypass ChooseMove as HumanAgent clearly isn't an AI and shouldn't run the AI agent pipeline.
-    protected override SearchResult ChooseMove(BoardState state) => throw new System.NotSupportedException("Human agents must not use the ChooseMove agent pipeline.");
+    protected override SearchResult ChooseMove(BoardState state, CancellationToken cancellationToken) => throw new System.NotSupportedException("Human agents must not use the ChooseMove agent pipeline.");
 }
 
 public readonly struct ThinkStats

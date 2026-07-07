@@ -1,11 +1,12 @@
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Threading;
 using UnityEngine;
+using UnityEngine.SocialPlatforms.Impl;
 
-// Adds iterative deepening and principal variation
-// More conditions to extensions
-// https://www.chessprogramming.org/Principal_Variation
+// https://www.chessprogramming.org/Time_Management
 
-public class RookFileBonus_12 : ChessAgent
+public class TimeConstrained_13 : ChessAgent
 {
     [SerializeField, Range(1,15)] private int searchDepth = 5;
     public override int? SearchDepth => searchDepth;
@@ -127,6 +128,42 @@ public class RookFileBonus_12 : ChessAgent
         }
     }
 
+    private float ComputeMoveTime()
+    {
+        if (!RemainingTime.HasValue)
+            return float.PositiveInfinity;
+
+        float remaining = Mathf.Max(
+            0f,
+            RemainingTime.Value
+        );
+
+        float target =
+            remaining / 20f
+            + Increment / 2f;
+
+        // Keep a small reserve for:
+        // - task scheduling
+        // - frame delay
+        // - move handoff
+        // - BoardManager processing
+        float reserve = Mathf.Clamp(
+            remaining * 0.05f,
+            0.02f,
+            0.25f
+        );
+
+        float maxSpend = Mathf.Max(
+            0f,
+            remaining - reserve
+        );
+
+        return Mathf.Min(
+            target,
+            maxSpend
+        );
+    }
+
     private int GetPhase(in BoardState state)
     {
         int phase = TOTAL_PHASE;
@@ -141,29 +178,55 @@ public class RookFileBonus_12 : ChessAgent
         phase -= BitUtils.PopCount(state.BlackQueens) * PHASE_QUEEN;
 
         // phase is in [0, 24]. Blends opening and endgame evaluation
+        // Used for king safety - more pieces, more safety kings require.
         // 0 = opening, 24 = endgame
         return Mathf.Clamp(phase, 0, TOTAL_PHASE);
     }
 
-    protected override SearchResult ChooseMove(BoardState state)
+    protected override SearchResult ChooseMove(BoardState state, CancellationToken ct)
     {
+        nodeCheckCounter = 0;
+
+        float timeBudget = ComputeMoveTime();
+
+        Stopwatch stopwatch = Stopwatch.StartNew();
+
         Line previousPv = new Line(MAX_PV_LENGTH);
         Line currentPv = new Line(MAX_PV_LENGTH);
 
         int bestScore = -int.MaxValue;
 
+        float previousElapsed = 0f;
+
         for (int depth = 1; depth <= searchDepth; depth++)
         {
+            ct.ThrowIfCancellationRequested();
+
             currentPv = new Line(MAX_PV_LENGTH);
 
             bestScore = SearchRoot(
                 ref state,
                 depth,
                 previousPv,
-                ref currentPv
+                ref currentPv,
+                ct
             );
 
             previousPv = currentPv;
+
+            float elapsed = (float)stopwatch.Elapsed.TotalSeconds;
+
+            float iterationTime =
+                elapsed - previousElapsed;
+
+            previousElapsed = elapsed;
+
+            // Stop if we have used up the budget.
+            // elapsed * 4f is a cheap heuristic to avoid doing another branch on an exponentially larger search, saving time.
+            float estimatedNextDepth = iterationTime * 4f;
+
+            if (elapsed + estimatedNextDepth >= timeBudget)
+                break;
         }
 
         if (currentPv.CMove == 0)
@@ -176,7 +239,7 @@ public class RookFileBonus_12 : ChessAgent
         );
     }
 
-    private int SearchRoot(ref BoardState state, int depth, Line previousPv, ref Line pv)
+    private int SearchRoot(ref BoardState state, int depth, Line previousPv, ref Line pv, CancellationToken ct)
     {
         int bestScore = -int.MaxValue;
 
@@ -196,22 +259,43 @@ public class RookFileBonus_12 : ChessAgent
             Line childPv = new Line(MAX_PV_LENGTH);
 
             UndoInfo undo = MakeSearchMove(ref state, move);
+            int score;
 
-            int ext = GetExtension(ref state, move, depth, legalMoveCount: moves.Count, in pv);
-            ext = Mathf.Min(ext, MAX_EXTENSION_PLIES);
+            try
+            {
+                int ext = GetExtension(
+                    ref state,
+                    move,
+                    depth,
+                    legalMoveCount: moves.Count,
+                    in pv
+                );
 
-            int score = -Negamax(
-                ref state,
-                depth - 1 + ext,
-                -beta,
-                -alpha,
-                ref childPv,
-                previousPv,
-                1,
-                MAX_EXTENSION_PLIES - ext
-            );
+                ext = Mathf.Min(
+                    ext,
+                    MAX_EXTENSION_PLIES
+                );
 
-            UnmakeSearchMove(ref state, move, undo);
+                score = -Negamax(
+                    ref state,
+                    depth - 1 + ext,
+                    -beta,
+                    -alpha,
+                    ref childPv,
+                    previousPv,
+                    1,
+                    MAX_EXTENSION_PLIES - ext,
+                    ct
+                );
+            }
+            finally
+            {
+                UnmakeSearchMove(
+                    ref state,
+                    move,
+                    undo
+                );
+            }
 
             if (score > bestScore)
             {
@@ -251,8 +335,10 @@ public class RookFileBonus_12 : ChessAgent
         return false;
     }
 
-    private int Negamax(ref BoardState state, int depth, int alpha, int beta, ref Line pv, Line previousPv, int ply, int extensionsRemaining)
+    private int Negamax(ref BoardState state, int depth, int alpha, int beta, ref Line pv, Line previousPv, int ply, int extensionsRemaining, CancellationToken ct)
     {
+        CheckCancellation(ct);
+
         // Draw state
         if (state.IsFifty() || state.IsInsufficientMaterial() || IsThreefold(ref state))
         {
@@ -298,7 +384,7 @@ public class RookFileBonus_12 : ChessAgent
         if (depth == 0)
         {
             pv.CMove = 0;
-            return Quiescence(ref state, alpha, beta);
+            return Quiescence(ref state, alpha, beta, ct);
         }
 
         int bestScore = -int.MaxValue;
@@ -308,19 +394,43 @@ public class RookFileBonus_12 : ChessAgent
             Line childPv = new Line(MAX_PV_LENGTH);
 
             UndoInfo undo = MakeSearchMove(ref state, move);
+            int score;
 
-            int ext = 0;
-
-            if (extensionsRemaining > 0)
+            try
             {
-                ext = GetExtension(ref state, move, depth, legalMoveCount: moves.Count, in pv);
-                ext = Mathf.Min(ext, extensionsRemaining);
+                int ext = GetExtension(
+                    ref state,
+                    move,
+                    depth,
+                    legalMoveCount: moves.Count,
+                    in pv
+                );
+
+                ext = Mathf.Min(
+                    ext,
+                    MAX_EXTENSION_PLIES
+                );
+
+                score = -Negamax(
+                    ref state,
+                    depth - 1 + ext,
+                    -beta,
+                    -alpha,
+                    ref childPv,
+                    previousPv,
+                    1,
+                    MAX_EXTENSION_PLIES - ext,
+                    ct
+                );
             }
-
-            int score = -Negamax(ref state, depth - 1 + ext, -beta, -alpha, ref childPv, previousPv, ply + 1, extensionsRemaining - ext);
-
-
-            UnmakeSearchMove(ref state, move, undo);
+            finally
+            {
+                UnmakeSearchMove(
+                    ref state,
+                    move,
+                    undo
+                );
+            }
 
             if (score > bestScore)
             {
@@ -356,7 +466,7 @@ public class RookFileBonus_12 : ChessAgent
         return bestScore;
     }
 
-    private int Quiescence(ref BoardState state, int alpha, int beta)
+    private int Quiescence(ref BoardState state, int alpha, int beta, CancellationToken ct)
     {
         // https://www.chessprogramming.org/Quiescence_Search
         // https://www.chessprogramming.org/Delta_Pruning
@@ -382,7 +492,7 @@ public class RookFileBonus_12 : ChessAgent
             {
                 UndoInfo undo = MakeSearchMove(ref state, move);
 
-                int score = -Quiescence(ref state, -beta, -alpha);
+                int score = -Quiescence(ref state, -beta, -alpha, ct);
 
                 UnmakeSearchMove(ref state, move, undo);
 
@@ -418,7 +528,7 @@ public class RookFileBonus_12 : ChessAgent
             if (bestValue + bigDelta < alpha) continue;
 
             UndoInfo undo = MakeSearchMove(ref state, move);
-            int score = -Quiescence(ref state, -beta, -alpha);
+            int score = -Quiescence(ref state, -beta, -alpha, ct);
             UnmakeSearchMove(ref state, move, undo);
 
             if (score >= beta) return score;
@@ -585,6 +695,7 @@ public class RookFileBonus_12 : ChessAgent
 
         moves.Sort((a, b) => GetMoveOrderScore(b, priorityMove).CompareTo(GetMoveOrderScore(a, priorityMove)));
     }
+
     private int GetExtension(ref BoardState state, Move move, int currentDepth, int legalMoveCount, in Line pv)
     {
         if (currentDepth <= 1) return 0;
@@ -600,7 +711,6 @@ public class RookFileBonus_12 : ChessAgent
 
         return 0;
     }
-
 
     private static int GetPieceValue(PieceType type)
     {

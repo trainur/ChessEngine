@@ -41,6 +41,7 @@ public class BoardManager : MonoBehaviour
 
     private AudioSource AudioS;
 
+    private TimeManager TimeHandler;
     private ChessboardImageCreator BoardHandler;
 
     private BoardState State;
@@ -49,11 +50,22 @@ public class BoardManager : MonoBehaviour
 
     private StatsHandler Stats;
 
+    private bool isGameOver;
+
     void Awake()
     {
         BoardHandler = GetComponent<ChessboardImageCreator>();
         AudioS = GetComponent<AudioSource>();
         Stats = GetComponent<StatsHandler>();
+        TimeHandler = GetComponent<TimeManager>();
+
+        TimeHandler.FlagFell += HandleFlagFall;
+    }
+
+    private void OnDestroy()
+    {
+        if (TimeHandler != null)
+            TimeHandler.FlagFell -= HandleFlagFall;
     }
 
     void Start()
@@ -77,6 +89,8 @@ public class BoardManager : MonoBehaviour
     {
         Debug.Log("Starting game");
 
+        isGameOver = false;
+
         PositionHistory.Clear();
 
         string fen = GetStartingFen();
@@ -92,9 +106,13 @@ public class BoardManager : MonoBehaviour
 
         RecordPosition(State.ZobristKey);
 
+        TimeHandler.StartNewGame(State.IsWhiteTurn);
         Stats.StartThinking(State.IsWhiteTurn);
+
         ChessAgent startingAgent = State.IsWhiteTurn ? WhiteAgent : BlackAgent;
-        startingAgent.StartTurn(State);
+        float remainingTime = TimeHandler.GetRemainingTime(State.IsWhiteTurn);
+
+        startingAgent.StartTurn(State, remainingTime, TimeHandler.IncrementSeconds);
     }
 
     private string GetStartingFen()
@@ -124,7 +142,11 @@ public class BoardManager : MonoBehaviour
 
     public void MakeMove(Move move, ThinkStats? thinkStats = null)
     {
+        if (isGameOver) return; // Debounce
+
         bool moveWasWhite = State.IsWhiteTurn;
+
+        if (!TimeHandler.TryCompleteTurn(moveWasWhite)) return;
 
         Stats.StopThinking(moveWasWhite);
 
@@ -142,10 +164,16 @@ public class BoardManager : MonoBehaviour
             return;
         }
 
-        Stats.StartThinking(State.IsWhiteTurn);
+        bool nextIsWhite = State.IsWhiteTurn;
 
-        ChessAgent nextAgent = State.IsWhiteTurn ? WhiteAgent : BlackAgent;
-        nextAgent.StartTurn(State);
+        TimeHandler.StartTurn(nextIsWhite);
+
+        float remainingTime = TimeHandler.GetRemainingTime(nextIsWhite);
+
+        Stats.StartThinking(nextIsWhite);
+
+        ChessAgent nextAgent = nextIsWhite ? WhiteAgent : BlackAgent;
+        nextAgent.StartTurn(State, remainingTime, TimeHandler.IncrementSeconds);
     }
 
     private GameResult? DetermineStatus()
@@ -193,6 +221,12 @@ public class BoardManager : MonoBehaviour
 
     private void OnGameEnd(GameResult result)
     {
+        if (isGameOver) return;
+
+        isGameOver = true;
+
+        TimeHandler.StopClock();
+
         // Later add reasons to csv or something
         Debug.Log($"Game over — Winner: {result.Winner}, Reason: {result.Reason}, Moves: {result.MoveCount}");
 
@@ -200,6 +234,28 @@ public class BoardManager : MonoBehaviour
 
         // Wait a couple of secs before starting new game
         StartCoroutine(RestartAfterDelay());
+    }
+
+    private void HandleFlagFall(bool whiteFlagged)
+    {
+        ChessAgent flaggedAgent = whiteFlagged
+            ? WhiteAgent
+            : BlackAgent;
+
+        flaggedAgent.AbortTurn();
+
+        Stats.StopThinking(whiteFlagged);
+
+        if (whiteFlagged) Stats.blackWins++;
+        else Stats.whiteWins++;
+
+        AudioS.PlayOneShot(EndClip);
+
+        int moveCount = State.IsWhiteTurn
+            ? State.FullMoveNumber - 1
+            : State.FullMoveNumber;
+
+        OnGameEnd(new GameResult(whiteFlagged ? "Black" : "White", "Time", moveCount));
     }
 
     private IEnumerator RestartAfterDelay()

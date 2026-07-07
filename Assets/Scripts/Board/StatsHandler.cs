@@ -1,7 +1,8 @@
 using System;
+using System.Collections;
 using TMPro;
 using UnityEngine;
-using System.Collections;
+using UnityEngine.UI;
 
 public class StatsHandler : MonoBehaviour
 {
@@ -25,10 +26,28 @@ public class StatsHandler : MonoBehaviour
     private Coroutine whiteThinkingCoroutine;
     private Coroutine blackThinkingCoroutine;
 
+    private TimeManager TimeHandler;
+
+    private void Awake()
+    {
+        TimeHandler = GetComponent<TimeManager>();
+    }
+
     private void Update()
     {
         WhiteStats.RefreshDepth();
         BlackStats.RefreshDepth();
+
+        if (TimeHandler == null)
+            return;
+
+        WhiteStats.UpdateTime(
+            TimeHandler.GetRemainingTime(true)
+        );
+
+        BlackStats.UpdateTime(
+            TimeHandler.GetRemainingTime(false)
+        );
     }
 
     public void InitialiseAgents(ChessAgent whiteAgent, ChessAgent blackAgent)
@@ -42,9 +61,14 @@ public class StatsHandler : MonoBehaviour
 
     public void ResetStats()
     {
+        StopThinking(true);
+        StopThinking(false);
 
         WhiteStats.Init("White", WhiteAgent);
         BlackStats.Init("Black", BlackAgent);
+
+        SetTimerActive(true, false);
+        SetTimerActive(false, false);
     }
 
     public void UpdateAgentStats(bool moveWasWhite, ThinkStats? thinkStats = null)
@@ -67,15 +91,27 @@ public class StatsHandler : MonoBehaviour
 
     public void StartThinking(bool isWhite)
     {
+        // Ensure the other animation is stopped.
+        StopThinking(!isWhite);
+
+        SetTimerActive(isWhite, true);
+        SetTimerActive(!isWhite, false);
+
         if (isWhite)
         {
-            if (whiteThinkingCoroutine != null) StopCoroutine(whiteThinkingCoroutine);
-            whiteThinkingCoroutine = StartCoroutine(ThinkingAnimation(WhiteStats));
+            if (whiteThinkingCoroutine != null)
+                StopCoroutine(whiteThinkingCoroutine);
+
+            whiteThinkingCoroutine =
+                StartCoroutine(ThinkingAnimation(WhiteStats));
         }
         else
         {
-            if (blackThinkingCoroutine != null) StopCoroutine(blackThinkingCoroutine);
-            blackThinkingCoroutine = StartCoroutine(ThinkingAnimation(BlackStats));
+            if (blackThinkingCoroutine != null)
+                StopCoroutine(blackThinkingCoroutine);
+
+            blackThinkingCoroutine =
+                StartCoroutine(ThinkingAnimation(BlackStats));
         }
     }
 
@@ -83,12 +119,16 @@ public class StatsHandler : MonoBehaviour
     {
         if (isWhite)
         {
-            if (whiteThinkingCoroutine != null) StopCoroutine(whiteThinkingCoroutine);
+            if (whiteThinkingCoroutine != null)
+                StopCoroutine(whiteThinkingCoroutine);
+
             whiteThinkingCoroutine = null;
         }
         else
         {
-            if (blackThinkingCoroutine != null) StopCoroutine(blackThinkingCoroutine);
+            if (blackThinkingCoroutine != null)
+                StopCoroutine(blackThinkingCoroutine);
+
             blackThinkingCoroutine = null;
         }
     }
@@ -102,8 +142,14 @@ public class StatsHandler : MonoBehaviour
         {
             panel.StartThinkingText(frames[i % frames.Length]);
             i++;
-            yield return new WaitForSeconds(0.4f);
+            yield return new WaitForSecondsRealtime(0.4f);
         }
+    }
+
+    public void SetTimerActive(bool isWhite, bool active)
+    {
+        if (isWhite) WhiteStats.SetTimerActive(active);
+        else BlackStats.SetTimerActive(active);
     }
 
     [Serializable]
@@ -114,6 +160,7 @@ public class StatsHandler : MonoBehaviour
         [SerializeField] private TMP_Text PosEvalText;
         [SerializeField] private TMP_Text DepthText;
         [SerializeField] private TMP_Text EvalScoreText;
+        [SerializeField] private TMP_Text TimeRemainingText;
         [SerializeField] private bool ReverseEval;
 
         private ChessAgent Agent;
@@ -125,13 +172,33 @@ public class StatsHandler : MonoBehaviour
         private float totalThinkTime;
         private int thinkCount;
 
+        [Header("Dim Target")]
+        [Tooltip("If set, this background image is dimmed/lit instead of the timer text.")]
+        [SerializeField] private Graphic DimBackground;
+
+        private readonly Color TimerDimColour = new Color(0.55f, 0.55f, 0.55f);
+        private Color activeColour;
+        private bool activeColourCaptured;
+
         public void Init(string sideName, ChessAgent agent)
         {
             SideName = sideName;
             Agent = agent;
 
+            lastAvgTime = null;
+            lastDepth = null;
             totalThinkTime = 0f;
             thinkCount = 0;
+
+            if (!activeColourCaptured)
+            {
+                activeColour = DimBackground != null
+                    ? DimBackground.color
+                    : TimeRemainingText.color;
+
+                activeColourCaptured = true;
+            }
+
 
             Header.text = $"{SideName} Stats ({Agent.Name})";
 
@@ -162,10 +229,44 @@ public class StatsHandler : MonoBehaviour
         public void StartThinkingText(string text)
         {
             string avg = lastAvgTime != null
-                ? $" <color=#9AA3B2>(avg {lastAvgTime}s)</color>"
+                ? $" <color=#9AA3B2>(avg {lastAvgTime})</color>"
                 : "";
 
             SetLine(ThinkTimeText, "Think Time", text + avg);
+        }
+
+        public void UpdateTime(float? remainingTime)
+        {
+            if (!remainingTime.HasValue)
+            {
+                TimeRemainingText.text = "N/A";
+                return;
+            }
+
+            float time = Mathf.Max(0f, remainingTime.Value);
+
+            if (time < 1f)
+            {
+                int hundredths = Mathf.FloorToInt(time * 100f);
+
+                TimeRemainingText.text = $"00:00.{hundredths:D2}";
+                return;
+            }
+
+            int totalSeconds = Mathf.FloorToInt(time);
+
+            int mins = totalSeconds / 60;
+            int secs = totalSeconds % 60;
+
+            TimeRemainingText.text = $"{mins:D2}:{secs:D2}";
+        }
+
+        public void SetTimerActive(bool active)
+        {
+            Color target = active ? activeColour : TimerDimColour;
+
+            if (DimBackground != null) DimBackground.color = target;
+            else TimeRemainingText.color = target;
         }
 
         public void SetStats(ThinkStats stats)

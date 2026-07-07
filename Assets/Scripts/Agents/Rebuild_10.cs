@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using System.Threading;
 
 // Attempt to fix Extensions_9
 // Minimax swapped to Negamax
@@ -117,7 +118,7 @@ public class Rebuild_10 : ChessAgent
         return Mathf.Clamp(phase, 0, TOTAL_PHASE);
     }
 
-    protected override SearchResult ChooseMove(BoardState state)
+    protected override SearchResult ChooseMove(BoardState state, CancellationToken ct)
     {
         Move? bestMove = null;
         int bestScore = -int.MaxValue;
